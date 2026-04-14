@@ -45,6 +45,8 @@ flet run src/countdown_app/main.py
 python src/countdown_app/main.py
 ```
 
+**单实例**：桌面模式下同一时间只允许运行一个进程；重复启动时会提示并退出。开发若需多开（例如对比调试），可设置环境变量 **`COUNTDOWN_ALLOW_MULTI=1`** 再运行。
+
 ## 测试
 
 ```powershell
