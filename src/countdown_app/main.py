@@ -127,10 +127,15 @@ async def main(page: ft.Page) -> None:
     )
 
     async def show_and_front() -> None:
+        """显示窗口并尽量置于前台（含被其他窗口遮挡、非托盘隐藏的情况）。"""
         page.window.visible = True
         page.window.skip_task_bar = False
+        page.window.minimized = False
+        page.window.focused = True
         page.update()
         try:
+            await page.window.to_front()
+            await asyncio.sleep(0.05)
             await page.window.to_front()
         except Exception:
             pass
@@ -388,6 +393,8 @@ async def main(page: ft.Page) -> None:
                     page.window.always_on_top = True
                     refresh_pin_button()
                     await show_and_front()
+                    # Toast 弹出会抢焦点，稍后再通知，便于先完成置顶/前置
+                    await asyncio.sleep(0.12)
                 desktop_integration.notify_countdown_finished(body)
                 page.show_dialog(
                     ft.AlertDialog(
@@ -534,6 +541,15 @@ def _patch_flet_desktop_download_headers() -> None:
 
 
 if __name__ == "__main__":
+    from countdown_app.single_instance import (
+        notify_second_instance_blocked,
+        try_acquire_single_instance,
+    )
+
+    if not try_acquire_single_instance():
+        notify_second_instance_blocked()
+        sys.exit(0)
+
     _patch_flet_desktop_download_headers()
     _apply_github_download_proxy()
     # 打包后已优先 FLET_VIEW_PATH 指向包内 flet；开发机无缓存时仍可能下载 zip。
