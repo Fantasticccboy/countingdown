@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 
@@ -10,6 +11,22 @@ class CountdownState(str, Enum):
 
 
 MAX_TOTAL_SECONDS = 86400
+
+
+def seconds_until_today_time(
+    now: datetime,
+    hour: int,
+    minute: int,
+    second: int,
+) -> int | None:
+    """返回从当前时刻到当天目标时间点的剩余秒数；若目标已过去则返回 None。"""
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        return None
+    target = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
+    delta = int((target - now).total_seconds())
+    if delta <= 0:
+        return None
+    return delta
 
 
 def format_duration(seconds: int) -> str:

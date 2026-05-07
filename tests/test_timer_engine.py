@@ -1,9 +1,12 @@
+from datetime import datetime
+
 from countdown_app.timer_engine import (
     MAX_TOTAL_SECONDS,
     CountdownEngine,
     CountdownState,
     format_duration,
     format_duration_friendly_cn,
+    seconds_until_today_time,
 )
 
 
@@ -127,3 +130,28 @@ def test_combined_hms() -> None:
     e = CountdownEngine()
     assert e.start_from_inputs("1", "2", "3") is None
     assert e.remaining_seconds == 3600 + 120 + 3
+
+
+def test_seconds_until_today_time_one_second_later() -> None:
+    now = datetime(2026, 5, 7, 12, 0, 0)
+    assert seconds_until_today_time(now, 12, 0, 1) == 1
+
+
+def test_seconds_until_today_time_next_minute() -> None:
+    now = datetime(2026, 5, 7, 12, 0, 0)
+    assert seconds_until_today_time(now, 12, 1, 0) == 60
+
+
+def test_seconds_until_today_time_cross_hour() -> None:
+    now = datetime(2026, 5, 7, 12, 59, 59)
+    assert seconds_until_today_time(now, 13, 0, 0) == 1
+
+
+def test_seconds_until_today_time_rejects_past_time() -> None:
+    now = datetime(2026, 5, 7, 15, 0, 0)
+    assert seconds_until_today_time(now, 14, 59, 59) is None
+
+
+def test_seconds_until_today_time_rejects_same_moment() -> None:
+    now = datetime(2026, 5, 7, 23, 59, 59)
+    assert seconds_until_today_time(now, 23, 59, 59) is None

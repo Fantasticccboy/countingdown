@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 
 import flet as ft
 
@@ -11,6 +12,7 @@ from countdown_app.timer_engine import (
     CountdownState,
     format_duration,
     format_duration_friendly_cn,
+    seconds_until_today_time,
 )
 
 
@@ -154,9 +156,13 @@ class TimerRow:
             content="最近（暂无）",
             on_click=self._on_recent_click,
         )
+        self.btn_pick_time = ft.OutlinedButton(
+            content="选择时间点",
+            on_click=self._on_pick_time_click,
+        )
 
         shortcuts_row = ft.Row(
-            [self.btn_recent, *self._preset_buttons],
+            [self.btn_recent, self.btn_pick_time, *self._preset_buttons],
             spacing=6,
             wrap=True,
         )
@@ -193,10 +199,10 @@ class TimerRow:
 
         self.root = ft.Container(
             content=inner,
-            padding=ft.padding.symmetric(horizontal=12, vertical=10),
-            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
             border_radius=8,
-            margin=ft.margin.only(bottom=4),
+            margin=ft.Margin.only(bottom=4),
         )
 
     def title(self) -> str:
@@ -262,11 +268,14 @@ class TimerRow:
             return
         self._apply_hms(*mr)
 
-    def _apply_hms(self, h: int, m: int, s: int) -> None:
-        if not (
+    def _can_edit_duration(self) -> bool:
+        return (
             self.engine.state is CountdownState.IDLE
             and self.engine.remaining_seconds == 0
-        ):
+        )
+
+    def _apply_hms(self, h: int, m: int, s: int) -> None:
+        if not self._can_edit_duration():
             return
         self._clear_error()
         self.field_hours.value = str(h)
@@ -274,13 +283,181 @@ class TimerRow:
         self.field_seconds.value = str(s)
         self._page.update()
 
-    def _refresh_shortcut_buttons(self) -> None:
-        can_edit = (
-            self.engine.state is CountdownState.IDLE
-            and self.engine.remaining_seconds == 0
+    def _next_selectable_today_time(
+        self, now: datetime
+    ) -> tuple[int, int, int] | None:
+        next_second = now.replace(microsecond=0) + timedelta(seconds=1)
+        if next_second.date() != now.date():
+            return None
+        return next_second.hour, next_second.minute, next_second.second
+
+    def _sync_picker_text_styles(
+        self, picker: ft.CupertinoPicker, texts: list[ft.Text]
+    ) -> None:
+        selected = picker.selected_index
+        for idx, text in enumerate(texts):
+            is_selected = idx == selected
+            text.color = (
+                ft.Colors.ON_SURFACE if is_selected else ft.Colors.ON_SURFACE_VARIANT
+            )
+            text.weight = (
+                ft.FontWeight.W_700 if is_selected else ft.FontWeight.W_500
+            )
+            text.size = 22 if is_selected else 18
+
+    def _build_time_picker(
+        self,
+        label: str,
+        max_value: int,
+        selected_index: int,
+    ) -> tuple[ft.Column, ft.CupertinoPicker]:
+        texts = [
+            ft.Text(
+                f"{value:02d}",
+                text_align=ft.TextAlign.CENTER,
+                color=ft.Colors.ON_SURFACE_VARIANT,
+                weight=ft.FontWeight.W_500,
+                size=18,
+            )
+            for value in range(max_value + 1)
+        ]
+        picker = ft.CupertinoPicker(
+            controls=texts,
+            selected_index=selected_index,
+            item_extent=36,
+            width=96,
+            height=180,
+            use_magnifier=True,
+            magnification=1.08,
+            squeeze=1.15,
         )
+
+        def on_change(_: ft.ControlEvent) -> None:
+            self._sync_picker_text_styles(picker, texts)
+            self._page.update()
+
+        picker.on_change = on_change
+        self._sync_picker_text_styles(picker, texts)
+
+        column = ft.Column(
+            [
+                ft.Text(
+                    label,
+                    size=12,
+                    theme_style=ft.TextThemeStyle.LABEL_SMALL,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                picker,
+            ],
+            spacing=8,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            tight=True,
+        )
+        return column, picker
+
+    def _dismiss_dialog(self) -> None:
+        try:
+            self._page.pop_dialog()
+        except Exception:
+            pass
+
+    def _apply_selected_today_time(
+        self,
+        hour: int,
+        minute: int,
+        second: int,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        if not self._can_edit_duration():
+            return False
+        current = now or datetime.now()
+        remaining = seconds_until_today_time(current, hour, minute, second)
+        if remaining is None:
+            self._show_error("该时间点已过去，请重新选择")
+            self._page.update()
+            return False
+        hh, rem = divmod(remaining, 3600)
+        mm, ss = divmod(rem, 60)
+        self._apply_hms(hh, mm, ss)
+        return True
+
+    def _on_pick_time_click(self, _: ft.ControlEvent) -> None:
+        if not self._can_edit_duration():
+            return
+        default_selection = self._next_selectable_today_time(datetime.now())
+        if default_selection is None:
+            self._show_error("今天已没有可选时间点，请直接输入时长")
+            self._page.update()
+            return
+
+        hour_column, hour_picker = self._build_time_picker(
+            "时", 23, default_selection[0]
+        )
+        minute_column, minute_picker = self._build_time_picker(
+            "分", 59, default_selection[1]
+        )
+        second_column, second_picker = self._build_time_picker(
+            "秒", 59, default_selection[2]
+        )
+
+        def on_confirm(_: ft.ControlEvent) -> None:
+            ok = self._apply_selected_today_time(
+                hour_picker.selected_index,
+                minute_picker.selected_index,
+                second_picker.selected_index,
+            )
+            if ok:
+                self._dismiss_dialog()
+
+        sheet_content = ft.Column(
+            [
+                ft.Text(
+                    "滚动选择今天稍后的时、分、秒，确认后仅回填倒计时时长。",
+                    size=13,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Row(
+                    [hour_column, minute_column, second_column],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=16,
+                ),
+                ft.Row(
+                    [
+                        ft.CupertinoButton(
+                            content="取消",
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                            on_click=lambda _: self._dismiss_dialog(),
+                        ),
+                        ft.CupertinoButton(
+                            content="确定",
+                            on_click=on_confirm,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+            ],
+            tight=True,
+            spacing=12,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        self._page.show_dialog(
+            ft.CupertinoBottomSheet(
+                modal=True,
+                height=320,
+                padding=ft.Padding.only(left=16, top=16, right=16, bottom=20),
+                content=sheet_content,
+            )
+        )
+
+    def _refresh_shortcut_buttons(self) -> None:
+        can_edit = self._can_edit_duration()
         mr = self._recents.most_recent()
         self.btn_recent.disabled = not can_edit or mr is None
+        self.btn_pick_time.disabled = not can_edit
         if mr is None:
             self.btn_recent.content = "最近（暂无）"
         else:
